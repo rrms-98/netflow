@@ -63,49 +63,44 @@ POSTGRE
 apt update
 apt install postgresql -y
 ```
-CRIANDO USUARIO E BANCO:
+CRIANDO USUARIO E IMPORTANDO ESTRUTURA:
 ```
 sudo -u postgres psql
 CREATE USER netflow WITH PASSWORD 'senha_forte';
-CREATE DATABASE netflow OWNER netflow;
+```
+```
+sudo -u postgres psql -d netflow < netflow_schema.sql
 ```
 
-QUERY PARA CRIAÇÃO DE PARTIÇÃO DINÂMICA DENTRO DA TABELA FLOWS:
-```
-CREATE OR REPLACE FUNCTION create_partition(month_start date)
-RETURNS void AS $$
-DECLARE
-    month_end date;
-    table_name text;
-BEGIN
-    month_end := month_start + interval '1 month';
-    table_name := 'flows_' || to_char(month_start, 'YYYY_MM');
-
-    EXECUTE format(
-        'CREATE TABLE IF NOT EXISTS %I PARTITION OF flows
-         FOR VALUES FROM (%L) TO (%L)',
-        table_name, month_start, month_end
-    );
-END;
-$$ LANGUAGE plpgsql;
-```
-
-CRIANDO PARTIÇÃO:
-```
-SELECT create_partition('2026-04-01');
-```
-AUTOMATIZAR COM O CRONTAB:
-```
-crontab -e
-0 0 1 * * psql -U postgres -d netflow -c "SELECT create_partition(date_trunc('month', now())::date);"
-```
-QUERY PARA REALIZAR O DELETE NA TABELA QUE TEM 13 MESES:
+QUERY PARA VERIFICAÇÃO E DELETE DE TABELA COM MAIS DE 13 MESES E CRIAÇÃO DE TABELA DINAMICA:
 ```
 DO $$
 DECLARE
     part RECORD;
     limite DATE := date_trunc('month', now()) - interval '13 months';
+    mes_atual DATE := date_trunc('month', now());
+    proximo_mes DATE := date_trunc('month', now() + interval '1 month');
+    table_name text;
 BEGIN
+    -- Criar partição do mês atual
+    table_name := 'flows_' || to_char(mes_atual, 'YYYY_MM');
+
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS %I PARTITION OF flows
+         FOR VALUES FROM (%L) TO (%L)',
+        table_name, mes_atual, mes_atual + interval '1 month'
+    );
+
+    -- Criar partição do próximo mês (segurança)
+    table_name := 'flows_' || to_char(proximo_mes, 'YYYY_MM');
+
+    EXECUTE format(
+        'CREATE TABLE IF NOT EXISTS %I PARTITION OF flows
+         FOR VALUES FROM (%L) TO (%L)',
+        table_name, proximo_mes, proximo_mes + interval '1 month'
+    );
+
+    -- Limpar partições antigas
     FOR part IN
         SELECT inhrelid::regclass AS tabela
         FROM pg_inherits
@@ -119,13 +114,15 @@ BEGIN
     END LOOP;
 END $$;
 ```
-AUTOMAÇÃO DA QUERY:
+AUTOMATIZAR COM O CRONTAB:
 ```
 crontab -e
 ```
 ```
-0 3 * * * psql -U postgres -d netflow -c "DO $$ ... $$;"
+0 2 * * * sudo -u postgres psql -d netflow -c "DO $$ ... $$;"
 ```
+
+
 
 
 
