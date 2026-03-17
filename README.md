@@ -99,7 +99,7 @@ AUTOMATIZAR COM O CRONTAB:
 crontab -e
 0 0 1 * * psql -U postgres -d netflow -c "SELECT create_partition(date_trunc('month', now())::date);"
 ```
-AUTOMATIZANDO O DELETE DAS TABELAS COM MAIS DE 1 ANO E 1 MêS:
+QUERY PARA REALIZAR O DELETE NA TABELA QUE TEM 13 MESES:
 ```
 DO $$
 DECLARE
@@ -119,7 +119,29 @@ BEGIN
     END LOOP;
 END $$;
 ```
-
+AUTOMAÇÃO DA QUERY:
+```
+crontab -e
+```
+```
+DO $$
+DECLARE
+    part RECORD;
+    limite DATE := date_trunc('month', now()) - interval '13 months';
+BEGIN
+    FOR part IN
+        SELECT inhrelid::regclass AS tabela
+        FROM pg_inherits
+        WHERE inhparent = 'public.flows'::regclass
+    LOOP
+        IF substring(part.tabela::text from 'flows_(\d{4}_\d{2})') IS NOT NULL THEN
+            IF to_date(substring(part.tabela::text from '(\d{4}_\d{2})'), 'YYYY_MM') < limite THEN
+                EXECUTE 'DROP TABLE ' || part.tabela;
+            END IF;
+        END IF;
+    END LOOP;
+END $$;
+```
 
 
 
